@@ -4,7 +4,9 @@ from math import log10, sqrt, pi, cos, sin
 import json, os, time
 from dataclasses import dataclass, asdict
 
-# Try matplotlib for plots (Smith, polar, etc.)
+# -----------------------------
+# Optional matplotlib support
+# -----------------------------
 try:
     import matplotlib
     matplotlib.use("TkAgg")
@@ -14,24 +16,21 @@ try:
 except Exception:
     MATPLOTLIB_OK = False
 
+# -----------------------------
 # Files
-RF_LOG_FILE = "rf_link_log.txt"
-ANT_LOG_FILE = "antenna_log.txt"
+# -----------------------------
 SETTINGS_FILE = "calculator_settings.json"
 HISTORY_FILE = "calc_history.json"
 
 # -----------------------------
 # Databases
 # -----------------------------
-
-# Coax loss data (approx dB per 100 ft at given MHz)
-# Values are typical at 50 ohm, room temp. Interpolated internally.
 COAX_DB = {
-    "RG-58":  {50: 1.9, 150: 3.8, 450: 7.0, 900: 10.3, 1500: 13.5},
-    "RG-213": {50: 0.7, 150: 1.4, 450: 2.6, 900: 3.9, 1500: 5.1},
-    "LMR-240":{50: 0.6, 150: 1.3, 450: 2.7, 900: 4.1, 1500: 5.4},
-    "LMR-400":{50: 0.3, 150: 0.7, 450: 1.5, 900: 2.3, 1500: 3.0},
-    "LMR-600":{50: 0.2, 150: 0.5, 450: 1.1, 900: 1.7, 1500: 2.2},
+    "RG-58":   {50: 1.9, 150: 3.8, 450: 7.0, 900: 10.3, 1500: 13.5},
+    "RG-213":  {50: 0.7, 150: 1.4, 450: 2.6, 900: 3.9, 1500: 5.1},
+    "LMR-240": {50: 0.6, 150: 1.3, 450: 2.7, 900: 4.1, 1500: 5.4},
+    "LMR-400": {50: 0.3, 150: 0.7, 450: 1.5, 900: 2.3, 1500: 3.0},
+    "LMR-600": {50: 0.2, 150: 0.5, 450: 1.1, 900: 1.7, 1500: 2.2},
 }
 
 CONNECTOR_LOSS_DB = {
@@ -42,7 +41,6 @@ CONNECTOR_LOSS_DB = {
     "SMA": 0.08,
 }
 
-# Velocity factor quick DB (coax)
 COAX_VF_DB = {
     "RG-58": 0.66,
     "RG-213": 0.66,
@@ -51,11 +49,10 @@ COAX_VF_DB = {
     "LMR-600": 0.87,
 }
 
-# Materials VF for antennas
 MATERIAL_VF = {"Copper": 0.95, "Aluminum": 0.94, "Steel": 0.90, "Iron": 0.88}
 
 # -----------------------------
-# Helper dataclasses
+# History record
 # -----------------------------
 @dataclass
 class CalcRecord:
@@ -66,7 +63,7 @@ class CalcRecord:
     outputs: dict
 
 # -----------------------------
-# Main GUI
+# Main App
 # -----------------------------
 class RFAntennaGUI:
     def __init__(self, root):
@@ -78,7 +75,6 @@ class RFAntennaGUI:
         self.settings = self.load_settings()
         self.dark_mode = self.settings.get("dark_mode", True)
         self.unit_system = self.settings.get("unit_system", "metric")
-
         self.history = self.load_history()
 
         self.setup_styles()
@@ -121,7 +117,7 @@ class RFAntennaGUI:
         self.refresh_history_tab()
 
     # -----------------------------
-    # UI theme
+    # Theme
     # -----------------------------
     def setup_styles(self):
         self.light_bg = "#f0f0f0"
@@ -142,12 +138,15 @@ class RFAntennaGUI:
 
     def update_widget_colors(self, widget, bg, fg, entry_bg):
         try:
-            if isinstance(widget, tk.Frame) or isinstance(widget, tk.LabelFrame):
+            if isinstance(widget, (tk.Frame, tk.LabelFrame)):
                 widget.config(bg=bg)
-            elif isinstance(widget, (tk.Label, tk.Button)):
+            elif isinstance(widget, (tk.Label, tk.Button, tk.Checkbutton)):
                 widget.config(bg=bg, fg=fg)
-            elif isinstance(widget, tk.Entry) or isinstance(widget, tk.Text):
-                widget.config(bg=entry_bg, fg=fg, insertbackground=fg)
+            elif isinstance(widget, (tk.Entry, tk.Text, tk.Canvas)):
+                try:
+                    widget.config(bg=entry_bg, fg=fg, insertbackground=fg)
+                except:
+                    widget.config(bg=entry_bg)
 
             for child in widget.winfo_children():
                 self.update_widget_colors(child, bg, fg, entry_bg)
@@ -155,7 +154,7 @@ class RFAntennaGUI:
             pass
 
     # -----------------------------
-    # Widgets
+    # UI setup
     # -----------------------------
     def create_widgets(self):
         header = tk.Frame(self.root, bg=self.accent)
@@ -171,7 +170,7 @@ class RFAntennaGUI:
 
         self.dark_mode_btn = tk.Button(
             header,
-            text="🌙 Dark Mode" if not self.dark_mode else "☀ Light Mode",
+            text="☀ Light Mode" if self.dark_mode else "🌙 Dark Mode",
             command=self.toggle_dark_mode,
             bg=self.accent,
             fg="white",
@@ -191,13 +190,12 @@ class RFAntennaGUI:
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Tabs
         self.rf_tab = tk.Frame(self.notebook)
-        self.ant_tab = tk.Frame(self.notebook)
         self.friis_tab = tk.Frame(self.notebook)
         self.fresnel_tab = tk.Frame(self.notebook)
         self.coax_tab = tk.Frame(self.notebook)
         self.smith_tab = tk.Frame(self.notebook)
+        self.ant_tab = tk.Frame(self.notebook)
         self.pattern_tab = tk.Frame(self.notebook)
         self.history_tab = tk.Frame(self.notebook)
 
@@ -214,13 +212,13 @@ class RFAntennaGUI:
         self.create_friis_tab()
         self.create_fresnel_tab()
         self.create_coax_tab()
-        self.create_smith_tab()
+        self.create_smith_tab()     # Option B fallback built-in
         self.create_antenna_tab()
         self.create_pattern_tab()
         self.create_history_tab()
 
     # -----------------------------
-    # Unit conversion helpers
+    # Conversions
     # -----------------------------
     def freqToMhz(self, value, unit):
         u = unit.lower()
@@ -240,19 +238,11 @@ class RFAntennaGUI:
 
     def distToKm(self, value, unit):
         u = unit.lower()
-        if u in ["km"]: return value
-        if u in ["m"]: return value / 1000.0
-        if u in ["mi"]: return value * 1.609344
-        if u in ["ft"]: return value / 3280.84
+        if u == "km": return value
+        if u == "m": return value / 1000.0
+        if u == "mi": return value * 1.609344
+        if u == "ft": return value / 3280.84
         return value
-
-    def kmToDist(self, km, unit):
-        u = unit.lower()
-        if u == "km": return km
-        if u == "m": return km * 1000.0
-        if u == "mi": return km / 1.609344
-        if u == "ft": return km * 3280.84
-        return km
 
     def powerToDbm(self, value, unit):
         u = unit.lower()
@@ -310,7 +300,8 @@ class RFAntennaGUI:
             ndir = elements - 2
             for i in range(ndir):
                 frac = 0.48 - (0.01 * i)
-                if frac < 0.44: frac = 0.44
+                if frac < 0.44:
+                    frac = 0.44
                 directors.append(lam * frac * vf)
         return reflector, driven, directors
 
@@ -329,14 +320,13 @@ class RFAntennaGUI:
         points = COAX_DB.get(coax_type)
         if not points:
             return 0.0
-        # sort keys and linear interpolate
         freqs = sorted(points.keys())
         if freq_mhz <= freqs[0]:
             return points[freqs[0]]
         if freq_mhz >= freqs[-1]:
             return points[freqs[-1]]
-        for i in range(len(freqs)-1):
-            f1, f2 = freqs[i], freqs[i+1]
+        for i in range(len(freqs) - 1):
+            f1, f2 = freqs[i], freqs[i + 1]
             if f1 <= freq_mhz <= f2:
                 l1, l2 = points[f1], points[f2]
                 t = (freq_mhz - f1) / (f2 - f1)
@@ -344,8 +334,24 @@ class RFAntennaGUI:
         return points[freqs[-1]]
 
     # -----------------------------
-    # Tab: RF Link Budget + margin
+    # Scroll helper
     # -----------------------------
+    def make_scrollable(self, parent):
+        canvas = tk.Canvas(parent, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scrollable_frame = tk.Frame(canvas)
+
+        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        return scrollable_frame
+
+    # ============================================================
+    # RF LINK TAB
+    # ============================================================
     def create_rf_tab(self):
         scroll = self.make_scrollable(self.rf_tab)
 
@@ -433,8 +439,6 @@ class RFAntennaGUI:
             sens = self.rf_sensitivity_dbm.get()
             margin = prx_dbm - sens
 
-            # Simple availability estimate (placeholder curve)
-            # Rough idea: 10 dB ~ 90%, 20 dB ~ 99%, 30 dB ~ 99.9%
             if margin < 0:
                 avail = 0.0
             else:
@@ -478,12 +482,11 @@ class RFAntennaGUI:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    # -----------------------------
-    # Tab: Friis Noise Figure (cascade)
-    # -----------------------------
+    # ============================================================
+    # FRIIS TAB
+    # ============================================================
     def create_friis_tab(self):
         scroll = self.make_scrollable(self.friis_tab)
-
         tk.Label(scroll, text="Add each stage in order (front-end to backend).").pack(anchor="w", padx=10, pady=5)
 
         cols = ("Stage", "Gain (dB)", "NF (dB)", "Noise Temp (K)", "Use Temp?")
@@ -526,7 +529,6 @@ class RFAntennaGUI:
         self.friis_results = tk.Text(scroll, height=12, state=tk.DISABLED)
         self.friis_results.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # Seed one stage
         self.add_friis_stage()
 
     def add_friis_stage(self):
@@ -540,7 +542,6 @@ class RFAntennaGUI:
         sel = self.friis_tree.selection()
         for s in sel:
             self.friis_tree.delete(s)
-        # re-number stages
         for i, item in enumerate(self.friis_tree.get_children(), 1):
             vals = list(self.friis_tree.item(item, "values"))
             vals[0] = i
@@ -564,19 +565,15 @@ class RFAntennaGUI:
             if not stages:
                 raise ValueError("Add at least one stage.")
 
-            # Convert to linear
             G = [10**(g/10.0) for g,_,_,_ in stages]
 
-            # Convert each stage to noise factor F
             F = []
             for (g_db, nf_db, t_k, use_t) in stages:
                 if use_t:
-                    # F = 1 + T/290
                     F.append(1.0 + t_k/290.0)
                 else:
                     F.append(10**(nf_db/10.0))
 
-            # Friis:
             F_total = F[0]
             gain_prod = 1.0
             for i in range(1, len(F)):
@@ -611,12 +608,13 @@ class RFAntennaGUI:
 
     def _prod(self, arr):
         p=1.0
-        for a in arr: p*=a
+        for a in arr:
+            p*=a
         return p
 
-    # -----------------------------
-    # Tab: Fresnel / LOS
-    # -----------------------------
+    # ============================================================
+    # FRESNEL TAB
+    # ============================================================
     def create_fresnel_tab(self):
         scroll = self.make_scrollable(self.fresnel_tab)
 
@@ -671,9 +669,6 @@ class RFAntennaGUI:
 
             lam = self.wavelengthMeters(f_mhz * 1e6)
 
-            # Fresnel radius for n=1:
-            # r = sqrt( (lambda * d1 * d2) / (d1 + d2) )
-            # with distances in meters
             d1_m = d1 * 1000.0
             d2_m = d2 * 1000.0
             r1 = sqrt((lam * d1_m * d2_m) / (d1_m + d2_m))
@@ -707,9 +702,9 @@ class RFAntennaGUI:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    # -----------------------------
-    # Tab: Coax / connector loss
-    # -----------------------------
+    # ============================================================
+    # COAX TAB
+    # ============================================================
     def create_coax_tab(self):
         scroll = self.make_scrollable(self.coax_tab)
 
@@ -774,7 +769,6 @@ class RFAntennaGUI:
             conn_loss = conn_loss_each * self.cx_conn_count.get()
 
             total = loss + conn_loss
-
             vf = COAX_VF_DB.get(coax, 0.66)
 
             text = []
@@ -807,9 +801,9 @@ class RFAntennaGUI:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    # -----------------------------
-    # Tab: Smith chart / SWR / L-match
-    # -----------------------------
+    # ============================================================
+    # SMITH / SWR TAB (Option B built-in)
+    # ============================================================
     def create_smith_tab(self):
         scroll = self.make_scrollable(self.smith_tab)
 
@@ -839,27 +833,31 @@ class RFAntennaGUI:
         self.smith_results = tk.Text(scroll, height=10, state=tk.DISABLED)
         self.smith_results.pack(fill=tk.X, padx=10, pady=5)
 
+        # Always build a Tkinter smith chart canvas fallback
+        self.smith_canvas_tk = tk.Canvas(scroll, width=450, height=450, highlightthickness=0)
+        self.smith_canvas_tk.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.draw_smith_background()
+
+        # If matplotlib exists, overlay a nicer chart below the Tk fallback
         if MATPLOTLIB_OK:
             fig = Figure(figsize=(5, 5), dpi=100)
             self.smith_ax = fig.add_subplot(111)
             self.smith_canvas = FigureCanvasTkAgg(fig, master=scroll)
             self.smith_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        else:
-            tk.Label(scroll, text="Matplotlib not available: Smith chart disabled.").pack()
 
     def calculate_smith(self):
         try:
             R = self.sm_r.get()
             X = self.sm_x.get()
             Z0 = self.sm_z0.get()
+            f_mhz = self.sm_freq_mhz.get()
 
             ZL = complex(R, X)
             gamma = (ZL - Z0) / (ZL + Z0)
             mag = abs(gamma)
             swr = (1 + mag) / (1 - mag) if mag < 1 else float("inf")
 
-            # L-network suggestion (simple):
-            match_text = self.suggest_l_match(R, X, Z0, self.sm_freq_mhz.get())
+            match_text = self.suggest_l_match(R, X, Z0, f_mhz)
 
             text = []
             text.append("SMITH / SWR RESULTS")
@@ -877,11 +875,15 @@ class RFAntennaGUI:
             self.smith_results.insert(1.0, "\n".join(text))
             self.smith_results.config(state=tk.DISABLED)
 
+            # Always plot on Tk chart
+            self.plot_smith_point_tk(gamma)
+
+            # If matplotlib is available, plot also on mpl chart
             if MATPLOTLIB_OK:
-                self.plot_smith(gamma)
+                self.plot_smith_mpl(gamma)
 
             self.add_history("Match", "Smith/SWR", {
-                "R": R, "X": X, "Z0": Z0, "freq_mhz": self.sm_freq_mhz.get()
+                "R": R, "X": X, "Z0": Z0, "freq_mhz": f_mhz
             }, {
                 "gamma_mag": mag, "swr": swr
             })
@@ -889,7 +891,55 @@ class RFAntennaGUI:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    def plot_smith(self, gamma):
+    # ---- Tkinter Smith chart ----
+    def draw_smith_background(self):
+        c = self.smith_canvas_tk
+        c.delete("all")
+
+        w = int(c["width"]); h = int(c["height"])
+        cx, cy = w//2, h//2
+        r = min(w, h)//2 - 10
+
+        # Outer circle
+        c.create_oval(cx-r, cy-r, cx+r, cy+r)
+
+        # Resistance circles (normalized)
+        for rr in [0.2, 0.5, 1, 2, 5]:
+            x0 = cx + r*(rr/(1+rr))
+            rad = r/(1+rr)
+            c.create_oval(x0-rad, cy-rad, x0+rad, cy+rad, dash=(2,2))
+
+        # Reactance arcs (normalized)
+        for xx in [0.2, 0.5, 1, 2, 5]:
+            x0 = cx + r
+            # upper
+            y0 = cy - r/xx
+            rad = r/xx
+            c.create_oval(x0-rad, y0-rad, x0+rad, y0+rad, dash=(2,2))
+            # lower
+            y0 = cy + r/xx
+            c.create_oval(x0-rad, y0-rad, x0+rad, y0+rad, dash=(2,2))
+
+        # Center line
+        c.create_line(cx-r, cy, cx+r, cy, dash=(2,2))
+
+    def plot_smith_point_tk(self, gamma):
+        c = self.smith_canvas_tk
+        self.draw_smith_background()
+
+        w = int(c["width"]); h = int(c["height"])
+        cx, cy = w//2, h//2
+        r = min(w, h)//2 - 10
+
+        x = cx + gamma.real * r
+        y = cy - gamma.imag * r
+
+        c.create_oval(x-4, y-4, x+4, y+4, fill="black")
+        c.create_text(10, 10, anchor="nw",
+                      text=f"Γ = {gamma.real:+.3f} {gamma.imag:+.3f}j")
+
+    # ---- matplotlib Smith chart ----
+    def plot_smith_mpl(self, gamma):
         ax = self.smith_ax
         ax.clear()
         ax.set_title("Smith Chart (normalized)")
@@ -898,53 +948,42 @@ class RFAntennaGUI:
         ax.set_ylim(-1.1, 1.1)
         ax.grid(True, alpha=0.3)
 
-        # Outer circle
         th = [i*2*pi/400 for i in range(401)]
         ax.plot([cos(t) for t in th], [sin(t) for t in th])
-
-        # Plot point
         ax.plot([gamma.real], [gamma.imag], marker="o")
 
         self.smith_canvas.draw()
 
     def suggest_l_match(self, R, X, Z0, freq_mhz):
-        # Very simple L-match solver for R<Z0 or R>Z0 cases, assumes single freq.
         f = freq_mhz * 1e6
         if R <= 0:
             return "Invalid R."
 
-        # cancel reactive part first
         if abs(X) > 1e-6:
-            if X > 0:
-                cancel = f"Add series capacitor to cancel +j{X:.2f}Ω"
-            else:
-                cancel = f"Add series inductor to cancel j{X:.2f}Ω"
+            cancel = "Add series capacitor to cancel +jX." if X > 0 else "Add series inductor to cancel -jX."
         else:
             cancel = "No reactive cancel needed."
 
-        # Then match resistive part with L
         if R < Z0:
             Q = sqrt(Z0/R - 1)
             Xs = Q * R
             Xp = Z0 / Q
             Ls = Xs / (2*pi*f)
             Cp = 1 / (2*pi*f*Xp)
-            return (f"{cancel}\nLow-pass L: series L={Ls:.2e} H, shunt C={Cp:.2e} F\n"
-                    f"(Q≈{Q:.2f})")
+            return (f"{cancel}\nLow-pass L: series L={Ls:.2e} H, shunt C={Cp:.2e} F\n(Q≈{Q:.2f})")
         elif R > Z0:
             Q = sqrt(R/Z0 - 1)
             Xs = Q * Z0
             Xp = R / Q
             Cs = 1 / (2*pi*f*Xs)
             Lp = Xp / (2*pi*f)
-            return (f"{cancel}\nHigh-pass L: series C={Cs:.2e} F, shunt L={Lp:.2e} H\n"
-                    f"(Q≈{Q:.2f})")
+            return (f"{cancel}\nHigh-pass L: series C={Cs:.2e} F, shunt L={Lp:.2e} H\n(Q≈{Q:.2f})")
         else:
             return f"{cancel}\nR already matched to Z0."
 
-    # -----------------------------
-    # Tab: Antenna calculator
-    # -----------------------------
+    # ============================================================
+    # ANTENNA TAB
+    # ============================================================
     def create_antenna_tab(self):
         scroll = self.make_scrollable(self.ant_tab)
 
@@ -1072,12 +1111,11 @@ class RFAntennaGUI:
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    # -----------------------------
-    # Tab: Radiation patterns (quick theory)
-    # -----------------------------
+    # ============================================================
+    # PATTERN TAB
+    # ============================================================
     def create_pattern_tab(self):
         scroll = self.make_scrollable(self.pattern_tab)
-
         tk.Label(scroll, text="Theoretical patterns (placeholders for real NEC patterns).").pack(anchor="w", padx=10)
 
         self.pat_type = tk.StringVar(value="Half-wave dipole")
@@ -1094,10 +1132,11 @@ class RFAntennaGUI:
             self.pat_canvas = FigureCanvasTkAgg(fig, master=scroll)
             self.pat_canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         else:
-            tk.Label(scroll, text="Matplotlib not available for plots.").pack()
+            tk.Label(scroll, text="(Install matplotlib for polar plots.)").pack(anchor="w", padx=10)
 
     def plot_pattern(self):
         if not MATPLOTLIB_OK:
+            messagebox.showwarning("Plot unavailable", "Install matplotlib to use pattern plots.")
             return
         ax = self.pat_ax
         ax.clear()
@@ -1105,13 +1144,10 @@ class RFAntennaGUI:
 
         typ = self.pat_type.get()
         if typ == "Half-wave dipole":
-            # |sin(theta)| approximation in E-plane
             r = [abs(sin(th)) for th in t]
         elif typ == "Quarter-wave vertical":
-            # donut lobe slightly flatter
             r = [abs(sin(th))**0.7 for th in t]
         else:
-            # crude yagi forward lobe approximation
             r = []
             for th in t:
                 forward = max(0.0, cos(th))**3
@@ -1122,9 +1158,9 @@ class RFAntennaGUI:
         ax.set_title(f"{typ} Pattern (normalized)")
         self.pat_canvas.draw()
 
-    # -----------------------------
-    # Tab: History / export
-    # -----------------------------
+    # ============================================================
+    # HISTORY TAB
+    # ============================================================
     def create_history_tab(self):
         frame = tk.Frame(self.history_tab)
         frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
@@ -1182,9 +1218,9 @@ class RFAntennaGUI:
 
         with open(path, "w") as f:
             f.write("key,value\n")
-            for k,v in rec.inputs.items():
+            for k, v in rec.inputs.items():
                 f.write(f"input.{k},{v}\n")
-            for k,v in rec.outputs.items():
+            for k, v in rec.outputs.items():
                 f.write(f"output.{k},{v}\n")
         messagebox.showinfo("Exported", f"Saved CSV:\n{path}")
 
@@ -1243,23 +1279,6 @@ class RFAntennaGUI:
         messagebox.showinfo("Loaded", f"Profile loaded:\n{path}")
 
     # -----------------------------
-    # Scrollable frame helper
-    # -----------------------------
-    def make_scrollable(self, parent):
-        canvas = tk.Canvas(parent, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas)
-
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-        return scrollable_frame
-
-    # -----------------------------
     # UI actions
     # -----------------------------
     def toggle_dark_mode(self):
@@ -1267,12 +1286,13 @@ class RFAntennaGUI:
         self.settings["dark_mode"] = self.dark_mode
         self.save_settings()
         self.apply_theme()
-        self.dark_mode_btn.config(text="🌙 Dark Mode" if not self.dark_mode else "☀ Light Mode")
+        self.dark_mode_btn.config(text="☀ Light Mode" if self.dark_mode else "🌙 Dark Mode")
 
     def change_units(self):
         self.unit_system = self.unit_var.get()
         self.settings["unit_system"] = self.unit_system
         self.save_settings()
+
 
 # -----------------------------
 # Run
